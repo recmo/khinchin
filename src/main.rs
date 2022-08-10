@@ -21,6 +21,24 @@ fn zeta(precision: u32, n: u32) -> Float {
     Float::with_val(precision, Float::zeta_u(n))
 }
 
+fn zeta_sum(precision: u32, n: u32) -> Float {
+    let e = -(n as i32);
+    let mut z = Float::with_val(precision, 1);
+
+    // 2^(-n)
+    z += Float::with_val(2, Float::i_exp(1, e));
+
+    for k in 3.. {
+        let leading_zeros = (((k as f64).log2() * (n as f64)).floor() as u32);
+        if leading_zeros > precision {
+            break;
+        }
+        z += Float::with_val((precision - leading_zeros).max(32), k).pow(e);
+    }
+
+    z
+}
+
 /// Computes ζ(n) using a lower precision version.
 ///
 /// von Staudt-Clausen's algorithm.
@@ -111,17 +129,11 @@ fn k0(precision: u32) -> Float {
 fn bench_zeta(precision: u32) {
     for i in (4..precision / 2).step_by(2) {
         let now = Instant::now();
-        let result: Float = zeta_boost(zeta, precision, i) - 1;
+        let result: Float = zeta_boost(zeta_sum, precision, i) - 1;
         let elapsed = now.elapsed();
-        let expected: Float = zeta(precision, i) - 1;
-        let error = (result - expected).abs().to_f64().log2();
-        println!(
-            "{} {} {} {}",
-            precision,
-            i,
-            1000.0 * elapsed.as_secs_f64(),
-            error
-        );
+        // let expected: Float = zeta(precision, i) - 1;
+        // let error = (result - expected).abs().to_f64().log2();
+        println!("{} {} {}", precision, i, 1000.0 * elapsed.as_secs_f64(),);
     }
 }
 
