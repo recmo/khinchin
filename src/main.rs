@@ -6,6 +6,7 @@
 
 use once_cell::sync::Lazy;
 use primal::{estimate_nth_prime, Sieve};
+use rayon::prelude::*;
 use rug::{float::Constant, ops::Pow, Float};
 use std::{
     f64::consts::{LN_2, TAU},
@@ -28,19 +29,26 @@ fn zeta_sum(precision: u32, n: u32) -> Float {
     // 2^(-n)
     z += Float::with_val(2, Float::i_exp(1, e));
 
-    (3..)
+    // Compute upper bound for range
+    let k_upper = 2.0.pow((precision as f64) / (n as f64)).ceil() as i32;
+
+    // Sum the terms in parallel with map/reduce
+    let sum = (3..=k_upper).into_par_iter()
         .map(|k| {
             let leading_zeros = (((k as f64).log2() * (n as f64) - 1.0).floor() as u32);
-            (k, leading_zeros)
-        })
-        .take_while(|(_, leading_zeros)| leading_zeros <= &precision)
-        .map(|(k, leading_zeros)| {
-            let precision = (precision - leading_zeros).max(32);
-            let term = Float::with_val(precision, k).pow(e);
+            let precision = precision.saturating_sub(leading_zeros).max(32);
+            let term = Float::with_val(precision, Float::i_pow_u(k, n)).recip();
             assert!(leading_zeros as i32 <= -term.get_exp().unwrap());
             term
         })
-        .for_each(|term| z += term);
+        .reduce(|| Float::with_val(2, 0), |acc, x| 
+            if acc.prec() >= x.prec() {
+                acc + &x
+            } else {
+                x + &acc
+            }
+        );
+    z += sum;
 
     z
 }
