@@ -13,6 +13,7 @@ use rug::{
     Float, Rational,
 };
 use std::{
+    cmp::max,
     f64::consts::{LN_2, TAU},
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
@@ -24,6 +25,7 @@ static SIEVE: Lazy<Sieve> = Lazy::new(|| {
 });
 
 static TABLE_TIME: AtomicU64 = AtomicU64::new(0);
+static SUM_TIME: AtomicU64 = AtomicU64::new(0);
 static ZETA_TIME: AtomicU64 = AtomicU64::new(0);
 static INNER_TIME: AtomicU64 = AtomicU64::new(0);
 static DIVSUM_TIME: AtomicU64 = AtomicU64::new(0);
@@ -69,14 +71,15 @@ fn zeta_sum(precision: u32, n: u32) -> Float {
 
 struct ZetaTable {
     precision: u32,
-    n: u32,
-    table: Vec<Float>,
+    n:         u32,
+    table:     Vec<Float>,
 }
 
 impl ZetaTable {
     pub fn new(precision: u32, n: u32) -> Self {
         let mut result = Self {
-            precision, n,
+            precision,
+            n,
             table: Vec::new(),
         };
         let k_max = result.k_max();
@@ -87,37 +90,39 @@ impl ZetaTable {
         result
     }
 
-    pub fn zeta(&mut self, n: u32) -> Float {
+    pub fn zeta_m1(&mut self, n: u32) -> Float {
         assert!(n >= self.n);
         assert!(n % 2 == 0);
         let now = Instant::now();
-        while n < self.n {
+
+        // 2^(-n)
+        let mut z = Float::new(2);
+
+        while self.n < n {
             self.n += 2;
             let k_upper = self.k_max();
 
+            // 2^(-n)
+            z = Float::with_val(self.precision + 1 - n, Float::i_exp(1, -(n as i32)));
+
             // Update table
             self.table.truncate(k_upper);
-            self.table.iter_mut().skip(3).enumerate().for_each(|(k, term)| {
-                let leading_zeros = ((k as f64).log2() * (self.n as f64) - 1.0).floor() as u32;
-                let precision = self.precision.saturating_sub(leading_zeros).max(32);
-                term.set_prec(precision);
-                *term /= k * k;
-            });
+            self.table
+                .iter_mut()
+                .enumerate()
+                .skip(3)
+                .for_each(|(k, term)| {
+                    let leading_zeros = ((k as f64).log2() * (self.n as f64) - 1.0).floor() as u32;
+                    let precision = self.precision.saturating_sub(leading_zeros).max(32);
+                    term.set_prec(precision);
+                    *term /= k * k;
+                    z += &*term;
+                });
         }
         TABLE_TIME.fetch_add(now.elapsed().as_nanos() as u64, Ordering::Relaxed);
-
-        let mut z = Float::with_val(self.precision, 1);
-
-        // 2^(-n)
-        z += Float::with_val(2, Float::i_exp(1, -(n as i32)));
-
-        // Terms
-        for term in self.table.iter().skip(3) {
-            z += term;
-        }
-
+ 
         // Test
-        // let expected = zeta_sum(self.precision, self.n);
+        // let expected: Float = zeta_sum(self.precision, n) - 1;
         // let error = (&z - expected).abs().to_f64().log2();
         // dbg!(error);
 
@@ -157,10 +162,10 @@ impl ZetaBoost {
         }
     }
 
-    pub fn zeta(&mut self, n: u32) -> Float {
+    pub fn zeta_m1(&mut self, n: u32) -> Float {
         if let Some(table) = &mut self.table {
             let now = Instant::now();
-            let result = table.zeta(n);
+            let result = table.zeta_m1(n);
             ZETA_TIME.fetch_add(now.elapsed().as_nanos() as u64, Ordering::Relaxed);
             return result;
         }
@@ -174,10 +179,10 @@ impl ZetaBoost {
         .ceil() as u32;
 
         // If there are no savings, start a table approach
-        if inner_precision >= self.precision {
+        if n >= 3500 || inner_precision >= self.precision {
             self.table = Some(ZetaTable::new(self.precision, n));
             dbg!(n);
-            return self.zeta(n);
+            return self.zeta_m1(n);
         }
 
         // Compute the initial approximation
@@ -222,7 +227,7 @@ impl ZetaBoost {
 
         // Convert back to zeta using high precision (which we already have for factor
         // and divsum)
-        (Float::with_val(self.precision, integer) - divsum) * &self.factor
+        (Float::with_val(self.precision, integer) - divsum) * &self.factor - 1
     }
 
     // Updatable version of [`factor`]
@@ -260,7 +265,7 @@ fn k0(precision: u32) -> Float {
     for n in 2_u32.. {
         let s1_prev = s1.clone();
         s2 -= Rational::from((1, (2 * n - 2) * (2 * n - 1)));
-        s1 += &s2 * (zeta_boost.zeta(2 * n) - 1) / n;
+        s1 += &s2 * zeta_boost.zeta_m1(2 * n) / n;
         if s1 == s1_prev {
             break;
         }
@@ -272,7 +277,7 @@ fn bench_zeta(precision: u32) {
     let mut zeta_boost = ZetaBoost::new(precision);
     for i in (4..precision / 2).step_by(2) {
         let now = Instant::now();
-        let _result: Float = zeta_boost.zeta(i) - 1;
+        let _result: Float = zeta_boost.zeta_m1(i);
         let elapsed = now.elapsed();
         // let expected: Float = zeta(precision, i) - 1;
         let error = 0.0; //(result - expected).abs().to_f64().log2();
@@ -294,6 +299,10 @@ fn main() {
     eprintln!(
         "Table time: {:?}",
         Duration::from_nanos(TABLE_TIME.load(Ordering::Relaxed))
+    );
+    eprintln!(
+        "Sum time: {:?}",
+        Duration::from_nanos(SUM_TIME.load(Ordering::Relaxed))
     );
     eprintln!(
         "Zeta time: {:?}",
