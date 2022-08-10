@@ -28,13 +28,19 @@ fn zeta_sum(precision: u32, n: u32) -> Float {
     // 2^(-n)
     z += Float::with_val(2, Float::i_exp(1, e));
 
-    for k in 3.. {
-        let leading_zeros = (((k as f64).log2() * (n as f64)).floor() as u32);
-        if leading_zeros > precision {
-            break;
-        }
-        z += Float::with_val((precision - leading_zeros).max(32), k).pow(e);
-    }
+    (3..)
+        .map(|k| {
+            let leading_zeros = (((k as f64).log2() * (n as f64) - 1.0).floor() as u32);
+            (k, leading_zeros)
+        })
+        .take_while(|(_, leading_zeros)| leading_zeros <= &precision)
+        .map(|(k, leading_zeros)| {
+            let precision = (precision - leading_zeros).max(32);
+            let term = Float::with_val(precision, k).pow(e);
+            assert!(leading_zeros as i32 <= -term.get_exp().unwrap());
+            term
+        })
+        .for_each(|term| z += term);
 
     z
 }
@@ -118,7 +124,7 @@ fn k0(precision: u32) -> Float {
     for n in 2_u32.. {
         let s1_prev = s1.clone();
         s2 -= Float::with_val(precision, (2 * n - 2) * (2 * n - 1)).recip();
-        s1 += &s2 * (zeta(precision, 2 * n) - 1) / n;
+        s1 += &s2 * (zeta_boost(zeta_sum, precision, 2 * n) - 1) / n;
         if s1 == s1_prev {
             break;
         }
