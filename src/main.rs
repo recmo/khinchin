@@ -16,7 +16,7 @@ use std::{
     cmp::max,
     f64::consts::{LN_2, TAU},
     sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, Instant},
+    time::{Duration, Instant}, fs::{File, self}, io::Read, ops::Neg,
 };
 
 static SIEVE: Lazy<Sieve> = Lazy::new(|| {
@@ -179,9 +179,8 @@ impl ZetaBoost {
         .ceil() as u32;
 
         // If there are no savings, start a table approach
-        if n >= 3500 || inner_precision >= self.precision {
+        if inner_precision >= self.precision {
             self.table = Some(ZetaTable::new(self.precision, n));
-            dbg!(n);
             return self.zeta_m1(n);
         }
 
@@ -262,10 +261,10 @@ fn k0(precision: u32) -> Float {
 
     let mut s2: Float = Float::with_val(precision, 1);
     let mut zeta_boost = ZetaBoost::new(precision);
-    for n in 2_u32.. {
+    for n in 2_u64.. {
         let s1_prev = s1.clone();
-        s2 -= Rational::from((1, (2 * n - 2) * (2 * n - 1)));
-        s1 += &s2 * zeta_boost.zeta_m1(2 * n) / n;
+        s2 -= Rational::from((1, (2 * n - 2) * (2 * n - 1) ));
+        s1 += &s2 * zeta_boost.zeta_m1(2 * n as u32) / n;
         if s1 == s1_prev {
             break;
         }
@@ -291,35 +290,46 @@ fn bench_zeta(precision: u32) {
     }
 }
 
+fn bench_k0() {
+    let expected = reference();
+
+    println!("target_bits actual_bits table_time zeta_time inner_time divsum_time total_time");
+    for target_bits in (1..25).map(|i| i * 4000) {
+        reset();
+
+        // Compute
+        let now = Instant::now();
+        let k0 = k0(target_bits);
+        let total_time = now.elapsed();
+
+        // Measure accuracy
+        let actual_bits = (k0 - &expected).get_exp().unwrap().neg();
+
+        println!("{} {} {} {} {} {} {}", target_bits, actual_bits,
+            Duration::from_nanos(TABLE_TIME.load(Ordering::Relaxed)).as_secs_f64() * 1000.0,
+            Duration::from_nanos(ZETA_TIME.load(Ordering::Relaxed)).as_secs_f64() * 1000.0,
+            Duration::from_nanos(INNER_TIME.load(Ordering::Relaxed)).as_secs_f64() * 1000.0,
+            Duration::from_nanos(DIVSUM_TIME.load(Ordering::Relaxed)).as_secs_f64() * 1000.0,
+            total_time.as_secs_f64() * 1000.0,
+        );
+    }
+}
+
+fn reset() {
+    TABLE_TIME.store(0, Ordering::Relaxed);
+    ZETA_TIME.store(0, Ordering::Relaxed);
+    INNER_TIME.store(0, Ordering::Relaxed);
+    DIVSUM_TIME.store(0, Ordering::Relaxed);
+}
+
+fn reference() -> Float {
+    let digits = fs::read_to_string("simo1M.txt").unwrap();
+    Float::with_val(3_321_928, Float::parse(&digits).unwrap())
+}
+
 fn main() {
     let now = Instant::now();
     SIEVE.is_prime(2); // Make sure the Sieve is hot.
-    bench_zeta(34000);
 
-    eprintln!(
-        "Table time: {:?}",
-        Duration::from_nanos(TABLE_TIME.load(Ordering::Relaxed))
-    );
-    eprintln!(
-        "Sum time: {:?}",
-        Duration::from_nanos(SUM_TIME.load(Ordering::Relaxed))
-    );
-    eprintln!(
-        "Zeta time: {:?}",
-        Duration::from_nanos(ZETA_TIME.load(Ordering::Relaxed))
-    );
-    eprintln!(
-        "Inner time: {:?}",
-        Duration::from_nanos(INNER_TIME.load(Ordering::Relaxed))
-    );
-    eprintln!(
-        "DivSum time: {:?}",
-        Duration::from_nanos(DIVSUM_TIME.load(Ordering::Relaxed))
-    );
-    eprintln!("Total time: {:?}", now.elapsed());
-
-    // for i in 1.. {
-    //     let n = i * 512;
-    //     println!("{} {}", n, k0(n));
-    // }
+    bench_k0();
 }
