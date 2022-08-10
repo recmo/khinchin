@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use rug::{
     float::Constant,
     ops::{NegAssign, Pow},
-    Float,
+    Float, Rational,
 };
 use std::{
     f64::consts::{LN_2, TAU},
@@ -118,7 +118,7 @@ impl ZetaBoost {
                 .map(|p| p as u32)
                 .take_while(|&p| p - 1 <= n)
                 .filter(|&p| n % (p - 1) == 0)
-                .for_each(|p| sum += Float::with_val(self.precision, p).recip());
+                .for_each(|p| sum += Float::with_val(self.precision, Rational::from((1, p))));
             sum
         };
 
@@ -186,7 +186,7 @@ fn bench_zeta(precision: u32) {
         let now = Instant::now();
         let _result: Float = zeta_boost.zeta(zeta_sum, i) - 1;
         let elapsed = now.elapsed();
-        //let expected: Float = zeta(precision, i) - 1;
+        // let expected: Float = zeta(precision, i) - 1;
         let error = 0.0; //(result - expected).abs().to_f64().log2();
         println!(
             "{} {} {} {}",
