@@ -7,7 +7,10 @@
 use once_cell::sync::Lazy;
 use primal::{estimate_nth_prime, Sieve};
 use rug::{float::Constant, ops::Pow, Float};
-use std::{f64::consts::{LN_2, TAU}, time::Instant};
+use std::{
+    f64::consts::{LN_2, TAU},
+    time::Instant,
+};
 
 static SIEVE: Lazy<Sieve> = Lazy::new(|| {
     let (_lo, hi) = estimate_nth_prime(10_000_000);
@@ -123,6 +126,7 @@ fn bench_zeta(precision: u32) {
 }
 
 fn main() {
+    SIEVE.is_prime(2); // Make sure the Sieve is hot.
     bench_zeta(34000);
     // for i in 1.. {
     //     let n = i * 512;
