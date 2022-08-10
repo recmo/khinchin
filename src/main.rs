@@ -23,6 +23,7 @@ static SIEVE: Lazy<Sieve> = Lazy::new(|| {
     Sieve::new(hi as usize)
 });
 
+static TABLE_TIME: AtomicU64 = AtomicU64::new(0);
 static ZETA_TIME: AtomicU64 = AtomicU64::new(0);
 static INNER_TIME: AtomicU64 = AtomicU64::new(0);
 static DIVSUM_TIME: AtomicU64 = AtomicU64::new(0);
@@ -89,6 +90,7 @@ impl ZetaTable {
     pub fn zeta(&mut self, n: u32) -> Float {
         assert!(n >= self.n);
         assert!(n % 2 == 0);
+        let now = Instant::now();
         while n < self.n {
             self.n += 2;
             let k_upper = self.k_max();
@@ -102,6 +104,7 @@ impl ZetaTable {
                 *term /= k * k;
             });
         }
+        TABLE_TIME.fetch_add(now.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
         let mut z = Float::with_val(self.precision, 1);
 
@@ -256,7 +259,7 @@ fn k0(precision: u32) -> Float {
     let mut zeta_boost = ZetaBoost::new(precision);
     for n in 2_u32.. {
         let s1_prev = s1.clone();
-        s2 -= Float::with_val(precision, (2 * n - 2) * (2 * n - 1)).recip();
+        s2 -= Rational::from((1, (2 * n - 2) * (2 * n - 1)));
         s1 += &s2 * (zeta_boost.zeta(2 * n) - 1) / n;
         if s1 == s1_prev {
             break;
@@ -288,6 +291,10 @@ fn main() {
     SIEVE.is_prime(2); // Make sure the Sieve is hot.
     bench_zeta(34000);
 
+    eprintln!(
+        "Table time: {:?}",
+        Duration::from_nanos(TABLE_TIME.load(Ordering::Relaxed))
+    );
     eprintln!(
         "Zeta time: {:?}",
         Duration::from_nanos(ZETA_TIME.load(Ordering::Relaxed))
